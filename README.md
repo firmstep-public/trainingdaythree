@@ -156,14 +156,30 @@ Additionally, it is possible to convert strings into maps or lists, and visa ver
       "https://google.co.uk:4433/",
     ]
     ```
-14. `join(delim, list)` - Joins the list with the delimiter for a resultant string. This function works only on flat lists. 
-    ```hcl
+14. `join(delim, list)` - Joins the list with the delimiter for a resultant string. This function works only on flat lists.
+    `split(delim, string)` - Splits the string previously created by join back into a list. This is useful for pushing lists through module outputs since they currently only support string values.
+    ```
     > join("::", list("this", "list", "needs", "to", "be", "joined", "into", "a", "string"))
     this::list::needs::to::be::joined::into::a::string
     > join("//", list("this", "list", "needs", "to", "be", "joined", "into", "a", "string"))
     this//list//needs//to//be//joined//into//a//string
     ```
+    ```hcl
+    > split("::", "this::list::needs::to::be::joined::into::a::string")
+    [
+        "this",
+        "list",
+        "needs",
+        "to",
+        "be",
+        "joined",
+        "into",
+        "a",
+        "string",
+    ]
+    ```
 15. `keys(map)` - Returns a lexically sorted list of the map keys.
+    `values(map)` - Returns a list of the map values, in the order of the keys returned by the keys function. This function only works on flat maps and will return an error for maps that include nested lists or maps.
     ```hcl
     > map("apple", "tree", "zebra", "animal")
     {
@@ -187,6 +203,83 @@ Additionally, it is possible to convert strings into maps or lists, and visa ver
     18
     > length(list("this", "is", "a", "list"))
     4
+    ```
+17. `lookup(map, key, [default])` - Performs a dynamic lookup into a map variable. The map parameter should be another variable, such as var.amis. If key does not exist in map, the interpolation will fail unless you specify a third argument, default, which should be a string value to return if no key is found in map. This function only works on flat maps and will return an error for maps that include nested lists or maps.
+    ```hcl
+    > lookup(map("us-east-2", "ami-12345", "us-east-1", "ami-54369"), "us-west-1", "ami-99999")
+    ami-99999
+    > lookup(map("us-east-2", "ami-12345", "us-east-1", "ami-54369"), "us-east-2", "ami-99999")
+    ami-12345
+    ```
+18. `merge(map1, map2, ...)` - Returns the union of 2 or more maps. The maps are consumed in the order provided, and duplicate keys overwrite previous entries.
+    ```hcl
+    > merge(map("a", "b"), map("c", "d"))
+    {
+        "a" = "b"
+        "c" = "d"
+    }
+    ```
+
+## Terraform Syntax Help
+
+*  Single line comments start with `#`
+*  Multi-line comments are wrapped with `/*` and `*/`
+*  Values are assigned with the syntax of `key = value` (whitespace doesn't matter). The value can be any primitive (string, number, boolean), a list, or a map.
+*  Strings are in double-quotes.
+*  Strings can interpolate other values using syntax wrapped in ${}, such as ${var.foo}. 
+*  Multiline strings can use shell-style "here doc" syntax, with the string starting with a marker like `<<EOF` and then the string ending with EOF on a line of its own. The lines of the string and the end marker must not be indented.
+   ```
+   description = <<DESC
+   This is a multi
+   line description.
+   Often used when you need to maintain 
+   A certain format for things like
+   ```
+*  Numbers are assumed to be base 10. If you prefix a number with `0x`, it is treated as a hexadecimal number.
+*  Boolean values: `true`, `false`.
+*  Lists of primitive types can be made with square brackets (`[]`). Example: `["foo", "bar", "baz"]`.
+*  Maps can be made with braces (`{}`) and colons (`:`): `{ "foo": "bar", "bar": "baz" }`. Quotes may be omitted on keys, unless the key starts with a number, in which case quotes are required. Commas are required between key/value pairs for single line maps. A newline between key/value pairs is sufficient in multi-line maps.
+
+## Meta-parameters
+There are meta-parameters available to all resources
+
+*  `count (int)` - The number of identical resources to create. This doesn't apply to all resources. For details on using variables in conjunction with count, see Using Variables with count below.
+   Modules don't currently support the count parameter.
+*  `depends_on (list of strings)` - Explicit dependencies that this resource has. These dependencies will be created before this resource. For syntax and other details, see the section below on explicit dependencies.
+*  `provider (string)` - The name of a specific provider to use for this resource. The name is in the format of TYPE.ALIAS, for example, aws.west. Where west is set using the alias attribute in a provider. See multiple provider instances.
+*  `lifecycle (configuration block)` - Customizes the lifecycle behavior of the resource. The specific options are documented below.
+   The lifecycle block allows the following keys to be set:
+   -  `create_before_destroy (bool)` - This flag is used to ensure the replacement of a resource is created before the original instance is destroyed. As an example, this can be used to create an new DNS record before removing an old record.
+   -  `prevent_destroy (bool)` - This flag provides extra protection against the destruction of a given resource. When this is set to true, any plan that includes a destroy of this resource will return an error message.
+   -  `ignore_changes (list of strings)` - Customizes how diffs are evaluated for resources, allowing individual attributes to be ignored through changes. As an example, this can be used to ignore dynamic changes to the resource from external resources. Other meta-parameters cannot be ignored.
+      Ignored attribute names can be matched by their name, not state ID. For example, if an aws_route_table has two routes defined and the ignore_changes list contains "route", both routes will be ignored. Additionally you can also use a single entry with a wildcard (e.g. "*") which will match all attribute names. Using a partial string together with a wildcard (e.g. "rout*") is not supported.
+      example:
+      ```hcl
+      resource "aws_instance" "web" {
+            ami           = "ami-408c7f28"
+            instance_type = "t1.micro"
+            lifecycle {
+                create_before_destroy   = true
+                ignore_changes          = ["instance_type"]
+            }
+      }
+      ```
+*  `timeouts (configuration block)` - Individual Resources may provide a timeouts block to enable users to configure the amount of time a specific operation is allowed to take before being considered an error. For example, the aws_db_instance resource provides configurable timeouts for the create, update, and delete operations. Any Resource that provides Timeouts will document the default values for that operation, and users can overwrite them in their configuration.
+   ```hcl
+   resource "aws_db_instance" "timeout_example" {
+    allocated_storage = 10
+    engine            = "mysql"
+    engine_version    = "5.6.17"
+    instance_class    = "db.t1.micro"
+    name              = "mydb"
+
+    # ...
+
+    timeouts {
+        create = "60m"
+        delete = "2h"
+    }
+    }
     ```
 
 
